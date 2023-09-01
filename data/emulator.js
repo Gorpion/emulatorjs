@@ -3,14 +3,11 @@ class EmulatorJS {
     getCore(generic) {
         const core = this.config.system;
         /*todo:
-        Systems: Wonderswan (ws), Neo Geo Pocket,  msx
+        Systems: msx
         
         Cores:
-        - Beetle NeoPop
-        - Beetle WonderSwan
         - FreeChaF
         - FreeIntv
-        - Gearcoleco
         - NeoCD
         - O2EM
         - Vecx
@@ -25,11 +22,15 @@ class EmulatorJS {
                 'fbneo': 'arcade',
                 'fceumm': 'nes',
                 'gambatte': 'gb',
+                'gearcoleco': 'coleco',
                 'genesis_plus_gx': 'sega',
                 'handy': 'lynx',
                 'mame2003': 'mame2003',
+                'mednafen_ngp': 'ngp',
                 'mednafen_pce': 'pce',
+                'mednafen_pcfx': 'pcfx',
                 'mednafen_psx_hw': 'psx',
+                'mednafen_wswan': 'ws',
                 'melonds': 'nds',
                 'mgba': 'gba',
                 'mupen64plus_next': 'n64',
@@ -71,7 +72,11 @@ class EmulatorJS {
             'psx': 'pcsx_rearmed',
             '3do': 'opera',
             'psp': 'ppsspp',
-            'pce': 'mednafen_pce'
+            'pce': 'mednafen_pce',
+            'pcfx': 'mednafen_pcfx',
+            'ngp': 'mednafen_ngp',
+            'ws': 'mednafen_wswan',
+            'coleco': 'gearcoleco',
         }
         if (this.isSafari && this.isMobile && this.getCore(true) === "n64") {
             return "parallel_n64";
@@ -86,11 +91,15 @@ class EmulatorJS {
         'fbneo': ['zip', '7z'],
         'fceumm': ['fds', 'nes', 'unif', 'unf'],
         'gambatte': ['gb', 'gbc', 'dmg'],
+        'gearcoleco': ['col', 'cv', 'bin', 'rom'],
         'genesis_plus_gx': ['m3u', 'mdx', 'md', 'smd', 'gen', 'bin', 'cue', 'iso', 'chd', 'bms', 'sms', 'gg', 'sg', '68k', 'sgd'],
         'handy': ['lnx'],
         'mame2003': ['zip'],
+        'mednafen_ngp': ['ngp', 'ngc'],
         'mednafen_pce': ['pce', 'cue', 'ccd', 'iso', 'img', 'bin', 'chd'],
+        'mednafen_pcfx': ['cue', 'ccd', 'toc', 'chd'],
         'mednafen_psx': ['cue', 'toc', 'm3u', 'ccd', 'exe', 'pbp', 'chd'],
+        'mednafen_wswan': ['ws', 'wsc', 'pc2'],
         'mednafen_psx_hw': ['cue', 'toc', 'm3u', 'ccd', 'exe', 'pbp', 'chd'],
         'beetle_vb': ['vb', 'vboy', 'bin'],
         'melonds': ['nds'],
@@ -851,27 +860,44 @@ class EmulatorJS {
         })
     }
     downloadRom() {
-        return new Promise((resolve, reject) => {
-            
+        const extractFileNameFromUrl = url => {
+            if (!url) return null;
+            return url.split('/').pop().split("#")[0].split("?")[0];
+        };
+        const supportsExt = (ext) => {
+            const core = this.getCore();
+            if (!this.extensions[core]) return false;
+            return this.extensions[core].includes(ext);
+        };
+
+        return new Promise(resolve => {
             this.textElem.innerText = this.localization("Download Game Data");
+
             const gotGameData = (data) => {
                 if (['arcade', 'mame2003'].includes(this.getCore(true))) {
-                    this.fileName = this.config.gameUrl.split('/').pop().split("#")[0].split("?")[0];
+                    this.fileName = extractFileNameFromUrl(this.config.gameUrl);
                     FS.writeFile(this.fileName, new Uint8Array(data));
                     resolve();
                     return;
                 }
-                
-                let resData = {};
-                const needsCue = (["mednafen_psx", "mednafen_psx_hw", "mednafen_pce"].includes(this.getCore()));
-                const altName = this.config.gameUrl.startsWith("blob:") ? (this.config.gameName || "game") : this.config.gameUrl.split('/').pop().split("#")[0].split("?")[0];
+
+                const altName = this.config.gameUrl.startsWith("blob:") ? (this.config.gameName || "game") : extractFileNameFromUrl(this.config.gameUrl);
+
+                let disableCue = false;
+                if (['pcsx_rearmed', 'genesis_plus_gx', 'picodrive', 'mednafen_pce'].includes(this.getCore()) && this.config.disableCue === undefined) {
+                    disableCue = true;
+                } else {
+                    disableCue = this.config.disableCue;
+                }
+
+                let fileNames = [];
                 this.checkCompression(new Uint8Array(data), this.localization("Decompress Game Data"), (fileName, fileData) => {
                     if (fileName.includes("/")) {
                         const paths = fileName.split("/");
                         let cp = "";
                         for (let i=0; i<paths.length-1; i++) {
                             if (paths[i] === "") continue;
-                            cp += "/"+paths[i];
+                            cp += `/${paths[i]}`;
                             if (!FS.analyzePath(cp).exists) {
                                 FS.mkdir(cp);
                             }
@@ -881,49 +907,59 @@ class EmulatorJS {
                         FS.mkdir(fileName);
                         return;
                     }
-                    if (needsCue && ["m3u", "cue"].includes(fileName.split(".").pop().toLowerCase())) {
-                        resData[fileName] = fileData;
-                    } else if (fileName !== "!!notCompressedData") {
-                        resData[fileName] = true;
-                    }
                     if (fileName === "!!notCompressedData") {
                         FS.writeFile(altName, fileData);
-                        resData[altName] = true;
+                        fileNames.push(altName);
                     } else {
-                        FS.writeFile("/"+fileName, fileData);
+                        FS.writeFile(`/${fileName}`, fileData);
+                        fileNames.push(fileName);
                     }
                 }).then(() => {
-                    const fileNames = (() => {
-                        let rv = [];
-                        for (const k in resData) rv.push(k);
-                        return rv;
-                    })();
-                    if (fileNames.length === 1) fileNames[0] = altName;
-                    let execFile = null;
-                    if (needsCue) {
-                        execFile = this.gameManager.createCueFile(fileNames);
-                    }
-                    
-                    for (const k in resData) {
-                        if (k === "!!notCompressedData") {
-                            if (needsCue && execFile !== null) {
-                                this.fileName = execFile;
+                    let isoFile = null;
+                    let supportedFile = null;
+                    let cueFile = null;
+                    let selectedCueExt = null;
+                    fileNames.forEach(fileName => {
+                        const ext = fileName.split('.').pop().toLowerCase();
+                        if (supportedFile === null && supportsExt(ext)) {
+                            supportedFile = fileName;
+                        }
+                        if (isoFile === null && ['iso', 'cso', 'chd', 'elf'].includes(ext)) {
+                            isoFile = fileName;
+                        }
+                        if (['cue', 'ccd', 'toc', 'm3u'].includes(ext)) {
+                            if (this.getCore(true) === 'psx') {
+                                //always prefer m3u files for psx cores
+                                if (selectedCueExt !== 'm3u') {
+                                    if (cueFile === null || ext === 'm3u') {
+                                        cueFile = fileName;
+                                        selectedCueExt = ext;
+                                    }
+                                }
                             } else {
-                                this.fileName = altName;
+                                //prefer cue or ccd files over toc or m3u
+                                if (!['cue', 'ccd'].includes(selectedCueExt)) {
+                                    if (cueFile === null || ['cue', 'ccd'].includes(ext)) {
+                                        cueFile = fileName;
+                                        selectedCueExt = ext;
+                                    }
+                                }
                             }
-                            break;
                         }
-                        if (!this.fileName || ((this.extensions[this.getCore()] || []).includes(k.split(".").pop()) &&
-                            //always prefer m3u files for psx cores
-                            !(this.getCore(true) === "psx" && ["m3u", "ccd"].includes(this.fileName.split(".").pop())))) {
-                            this.fileName = k;
-                        }
-                        if (needsCue && execFile === null && ["m3u", "cue"].includes(k.split(".").pop().toLowerCase())) {
-                            FS.writeFile("/"+k, resData[k]);
-                        }
+                    });
+                    if (supportedFile !== null) {
+                        this.fileName = supportedFile;
+                    } else {
+                        this.fileName = fileNames[0];
                     }
-                    if (needsCue && execFile !== null) {
-                        this.fileName = execFile;
+                    if (isoFile !== null && (supportsExt('iso') || supportsExt('cso') || supportsExt('chd') || supportsExt('elf'))) {
+                        this.fileName = isoFile;
+                    } else if (supportsExt('cue') || supportsExt('ccd') || supportsExt('toc') || supportsExt('m3u')) {
+                        if (cueFile !== null) {
+                            this.fileName = cueFile;
+                        } else if (!disableCue) {
+                            this.fileName = this.gameManager.createCueFile(fileNames);
+                        }
                     }
                     resolve();
                 });
@@ -2073,6 +2109,66 @@ class EmulatorJS {
                 {id: 6, label: this.localization('LEFT')},
                 {id: 7, label: this.localization('RIGHT')},
             ];
+        } else if ('ngp' === this.getControlScheme()) {
+            buttons = [
+                {id: 0, label: this.localization('A')},
+                {id: 8, label: this.localization('B')},
+                {id: 3, label: this.localization('OPTION')},
+                {id: 4, label: this.localization('UP')},
+                {id: 5, label: this.localization('DOWN')},
+                {id: 6, label: this.localization('LEFT')},
+                {id: 7, label: this.localization('RIGHT')},
+            ];
+        } else if ('ws' === this.getControlScheme()) {
+            buttons = [
+                {id: 8, label: this.localization('A')},
+                {id: 0, label: this.localization('B')},
+                {id: 3, label: this.localization('START')},
+                {id: 4, label: this.localization('X UP')},
+                {id: 5, label: this.localization('X DOWN')},
+                {id: 6, label: this.localization('X LEFT')},
+                {id: 7, label: this.localization('X RIGHT')},
+                {id: 13, label: this.localization('Y UP')},
+                {id: 12, label: this.localization('Y DOWN')},
+                {id: 10, label: this.localization('Y LEFT')},
+                {id: 11, label: this.localization('Y RIGHT')},
+            ];
+        } else if ('coleco' === this.getControlScheme()) {
+            buttons = [
+                {id: 8, label: this.localization('LEFT BUTTON')},
+                {id: 0, label: this.localization('RIGHT BUTTON')},
+                {id: 9, label: this.localization('1')},
+                {id: 1, label: this.localization('2')},
+                {id: 11, label: this.localization('3')},
+                {id: 10, label: this.localization('4')},
+                {id: 13, label: this.localization('5')},
+                {id: 12, label: this.localization('6')},
+                {id: 15, label: this.localization('7')},
+                {id: 14, label: this.localization('8')},
+                {id: 2, label: this.localization('*')},
+                {id: 3, label: this.localization('#')},
+                {id: 4, label: this.localization('UP')},
+                {id: 5, label: this.localization('DOWN')},
+                {id: 6, label: this.localization('LEFT')},
+                {id: 7, label: this.localization('RIGHT')},
+            ];
+        } else if ('pcfx' === this.getControlScheme()) {
+            buttons = [
+                {id: 8, label: this.localization('I')},
+                {id: 0, label: this.localization('II')},
+                {id: 9, label: this.localization('III')},
+                {id: 1, label: this.localization('IV')},
+                {id: 10, label: this.localization('V')},
+                {id: 11, label: this.localization('VI')},
+                {id: 3, label: this.localization('RUN')},
+                {id: 2, label: this.localization('SELECT')},
+                {id: 12, label: this.localization('MODE1')},
+                {id: 13, label: this.localization('MODE2')},
+                {id: 4, label: this.localization('UP')},
+                {id: 5, label: this.localization('DOWN')},
+                {id: 6, label: this.localization('LEFT')},
+                {id: 7, label: this.localization('RIGHT')},
+            ];
         } else {
             buttons = [
                 {id: 0, label: this.localization('B')},
@@ -2795,6 +2891,43 @@ class EmulatorJS {
                 {"type":"dpad","location":"left","left":"50%","right":"50%","joystickInput":false,"inputValues":[4,5,6,7]},
                 {"type":"button","text":"Run","id":"run","location":"center","left":60,"fontSize":15,"block":true,"input_value":3},
                 {"type":"button","text":"Select","id":"select","location":"center","left":-5,"fontSize":15,"block":true,"input_value":2}
+            ];
+            info.push(...speedControlButtons);
+        } else if ('ngp' === this.getControlScheme()) {
+                info = [
+                    {"type":"button","text":"A","id":"a","location":"right","right":75,"top":70,"bold":true,"input_value":0},
+                    {"type":"button","text":"B","id":"b","location":"right","right":5,"top":50,"bold":true,"input_value":8},
+                    {"type":"dpad","location":"left","left":"50%","right":"50%","joystickInput":false,"inputValues":[4,5,6,7]},
+                    {"type":"button","text":"Option","id":"option","location":"center","left":30,"fontSize":15,"block":true,"input_value":3}
+                ];
+                info.push(...speedControlButtons);
+        } else if ('ws' === this.getControlScheme()) {
+            info = [
+                {"type":"button","text":"B","id":"b","location":"right","right":75,"top":150,"bold":true,"input_value":0},
+                {"type":"button","text":"A","id":"a","location":"right","right":5,"top":150,"bold":true,"input_value":8},
+                {"type":"dpad","location":"left","left":"50%","right":"50%","joystickInput":false,"inputValues":[4,5,6,7]},
+                {"type":"dpad","location":"right","left":"50%","right":"50%","joystickInput":false,"inputValues":[13,12,10,11]},
+                {"type":"button","text":"Start","id":"start","location":"center","left":30,"fontSize":15,"block":true,"input_value":3},
+            ];
+            info.push(...speedControlButtons);
+        } else if ('coleco' === this.getControlScheme()) {
+            info = [
+                {"type":"button","text":"L","id":"buttonLeft","location":"right","left":10,"top":40,"bold":true,"input_value":8},
+                {"type":"button","text":"R","id":"buttonRight","location":"right","left":81,"top":40,"bold":true,"input_value":0},
+                {"type":"dpad","location":"left","left":"50%","right":"50%","joystickInput":false,"inputValues":[4,5,6,7]}
+            ];
+            info.push(...speedControlButtons);
+        } else if ('pcfx' === this.getControlScheme()) {
+            info = [
+                {"type":"button","text":"I","id":"i","location":"right","right":5,"top":70,"bold":true,"input_value":8},
+                {"type":"button","text":"II","id":"ii","location":"right","right":75,"top":70,"bold":true,"input_value":0},
+                {"type":"button","text":"III","id":"iii","location":"right","right":145,"top":70,"bold":true,"input_value":9},
+                {"type":"button","text":"IV","id":"iv","location":"right","right":5,"top":0,"bold":true,"input_value":1},
+                {"type":"button","text":"V","id":"v","location":"right","right":75,"top":0,"bold":true,"input_value":10},
+                {"type":"button","text":"VI","id":"vi","location":"right","right":145,"top":0,"bold":true,"input_value":11},
+                {"type":"dpad","location":"left","left":"50%","right":"50%","joystickInput":false,"inputValues":[4,5,6,7]},
+                {"type":"button","text":"Select","id":"select","location":"center","left":-5,"fontSize":15,"block":true,"input_value":2},
+                {"type":"button","text":"Run","id":"run","location":"center","left":60,"fontSize":15,"block":true,"input_value":3}
             ];
             info.push(...speedControlButtons);
         } else {

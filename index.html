@@ -108,6 +108,15 @@
                     if (["pce"].includes(ext))
                         return "pce"
 
+                    if (["ngp", "ngc"].includes(ext))
+                        return "ngp"
+
+                    if (["ws", "wsc"].includes(ext))
+                        return "ws"
+
+                    if (["col", "cv"].includes(ext))
+                        return "coleco"
+
                     if (["nds", "gba", "gb", "z64", "n64"].includes(ext))
                         return ext
 
@@ -131,7 +140,11 @@
                             "Sega Saturn": "segaSaturn",
                             "Atari 7800": "atari7800",
                             "Atari 2600": "atari2600",
-                            "NEC TurboGrafx-16/SuperGrafx/PC Engine": "pce"
+                            "NEC TurboGrafx-16/SuperGrafx/PC Engine": "pce",
+                            "NEC PC-FX": "pcfx",
+                            "SNK NeoGeo Pocket (Color)": "ngp",
+                            "Bandai WonderSwan (Color)": "ws",
+                            "ColecoVision": "coleco"
                         }
 
                         const button = document.createElement("button")
