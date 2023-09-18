@@ -1652,7 +1652,6 @@ class EmulatorJS {
                 muteButton.style.display = (volume === 0) ? "none" : "";
             }
         }
-        if (!this.muted) this.setVolume(this.volume);
         
         this.addEventListener(volumeSlider, "change mousemove touchmove mousedown touchstart mouseup", (e) => {
             setTimeout(() => {
@@ -4668,6 +4667,7 @@ class EmulatorJS {
                 this.cheatChanged(false, code, getIndex(desc, code));
                 this.cheats.splice(getIndex(desc, code), 1);
                 row.remove();
+                this.saveSettings();
             })
             
             this.elements.cheatRows.appendChild(row);
