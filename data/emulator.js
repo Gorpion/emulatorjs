@@ -1,5 +1,5 @@
 class EmulatorJS {
-    version = 9; //Increase by 1 when cores are updated
+    version = 10; //Increase by 1 when cores are updated
     getCore(generic) {
         const core = this.config.system;
         /*todo:
@@ -16,6 +16,7 @@ class EmulatorJS {
             const options = {
                 'a5200': 'atari5200',
                 'beetle_vb': 'vb',
+                'desmume': 'nds',
                 'desmume2015': 'nds',
                 'fbalpha2012_cps1': 'arcade',
                 'fbalpha2012_cps2': 'arcade',
@@ -86,6 +87,7 @@ class EmulatorJS {
     }
     extensions = {
         'a5200': ['a52', 'bin'],
+        'desmume': ['nds', 'bin'],
         'desmume2015': ['nds', 'bin'],
         'fbalpha2012_cps1': ['zip'],
         'fbalpha2012_cps2': ['zip'],
@@ -242,8 +244,8 @@ class EmulatorJS {
         })
     }
     constructor(element, config) {
-        this.ejs_version = "4.0.6";
-        this.ejs_num_version = 40.6;
+        this.ejs_version = "4.0.7";
+        this.ejs_num_version = 40.7;
         this.debug = (window.EJS_DEBUG_XX === true);
         if (this.debug || (window.location && ['localhost', '127.0.0.1'].includes(location.hostname))) this.checkForUpdates();
         this.netplayEnabled = (window.EJS_DEBUG_XX === true) && (window.EJS_EXPERIMENTAL_NETPLAY === true);
@@ -1472,8 +1474,8 @@ class EmulatorJS {
             if (this.isNetplay && this.netplay.owner) {
                 this.gameManager.saveSaveFiles();
                 this.gameManager.restart();
+                this.netplay.reset();
                 this.netplay.sendMessage({restart:true});
-                this.netplay.current_frame = 0;
                 this.play();
             } else if (!this.isNetplay) {
                 this.gameManager.saveSaveFiles();
@@ -3332,9 +3334,9 @@ class EmulatorJS {
             createDPad({container: elem, event: (up, down, left, right) => {
                 if (dpad.joystickInput) {
                     if (up === 1) up=0x7fff;
-                    if (down === 1) up=0x7fff;
-                    if (left === 1) up=0x7fff;
-                    if (right === 1) up=0x7fff;
+                    if (down === 1) down=0x7fff;
+                    if (left === 1) left=0x7fff;
+                    if (right === 1) right=0x7fff;
                 }
                 this.gameManager.simulateInput(0, dpad.inputValues[0], up);
                 this.gameManager.simulateInput(0, dpad.inputValues[1], down);
@@ -4193,6 +4195,7 @@ class EmulatorJS {
             this.netplay.socket = io(this.netplay.url);
             this.netplay.socket.on("connect", () => callback());
             this.netplay.socket.on("users-updated", (users) => {
+                this.netplay.reset();
                 if (this.debug) console.log(users);
                 this.netplay.players = users;
                 this.netplay.updatePlayersTable();
@@ -4394,7 +4397,11 @@ class EmulatorJS {
         let justReset = false;
         this.netplay.dataMessage = (data) => {
             //console.log(data);
+            if (data.sync === true && this.netplay.owner) {
+                this.netplay.sync();
+            }
             if (data.state) {
+                this.netplay.wait = true;
                 this.netplay.setLoading(true);
                 this.pause(true);
                 this.gameManager.loadState(new Uint8Array(data.state));
@@ -4409,130 +4416,143 @@ class EmulatorJS {
             if (data.ready && this.netplay.owner) {
                 this.netplay.ready++;
                 if (this.netplay.ready === this.netplay.getUserCount()) {
-                    this.netplay.sendMessage({readyready:true, resetCurrentFrame: true});
-                    setTimeout(() => this.play(true), 100);
+                    this.netplay.sendMessage({readyready:true});
+                    this.netplay.reset();
+                    setTimeout(() => this.play(true), 48);
                     this.netplay.setLoading(false);
-                    this.netplay.current_frame = 0;
-                    justReset = true;
                 }
             }
             if (data.readyready) {
                 this.netplay.setLoading(false);
-                this.netplay.current_frame = 0;
-                this.play(true)
-            }
-            if (data.resetCurrentFrame) {
+                this.netplay.reset();
                 this.play(true);
-                this.netplay.current_frame = 0;
-                this.netplay.inputs = {};
             }
-            if (data.user_frame && this.netplay.owner) {
-                if (justReset) {
-                    justReset = false;
-                    this.netplay.current_frame = 0;
-                    this.netplay.inputs = {};
-                }
-                this.netplay.users[data.user_frame.user] = data.user_frame.frame;
-                //console.log(data.user_frame.frame, this.netplay.current_frame);
-            }
-            if (data.shortPause === this.netplay.playerID) {
+            if (data.shortPause) console.log(data.shortPause);
+            if (data.shortPause && data.shortPause !== this.netplay.playerID) {
                 this.pause(true);
-                setTimeout(() => this.play(true), 5);
-            } else if (data.lessShortPause === this.netplay.playerID) {
-                this.pause(true);
-                setTimeout(() => this.play(true), 10);
+                this.netplay.wait = true;
+                setTimeout(() => this.play(true), 48);
             }
-            if (data.input && this.netplay.owner) {
-                this.netplay.simulateInput(this.netplay.getUserIndex(data.user), data.input[0], data.input[1], true);
-            }
-            if (data.connected_input && !this.netplay.owner) {
-                if (!this.netplay.inputs[data.frame]) {
-                    this.netplay.inputs[data.frame] = [];
-                }
-                this.netplay.inputs[data.frame].push([data.connected_input[0], data.connected_input[1], data.connected_input[2]]);
+            if (data["sync-control"]) {
+                data["sync-control"].forEach((value) => {
+                    let inFrame = parseInt(value.frame);
+                    let frame = this.netplay.currentFrame;
+                    if (!value.connected_input || value.connected_input[0] < 0) return;
+                    //if (value.connected_input[0] === this.netplay.getUserIndex(this.netplay.playerID)) return;
+                    console.log(value, inFrame, frame);
+                    if (inFrame === frame) {
+                        inFrame++;
+                        this.gameManager.functions.simulateInput(value.connected_input[0], value.connected_input[1], value.connected_input[2]);
+                    }
+                    this.netplay.inputsData[inFrame] || (this.netplay.inputsData[inFrame] = []);
+                    this.netplay.inputsData[frame] || (this.netplay.inputsData[frame] = []);
+                    if (this.netplay.owner) {
+                        this.netplay.inputsData[frame].push(value);
+                        this.gameManager.functions.simulateInput(value.connected_input[0], value.connected_input[1], value.connected_input[2]);
+                        if (frame - 10 >= inFrame) {
+                            this.netplay.wait = true;
+                            this.pause(true);
+                            setTimeout(() => {
+                                this.play(true);
+                                this.netplay.wait = false;
+                            }, 48)
+                        }
+                    } else {
+                        this.netplay.inputsData[inFrame].push(value);
+                        if (this.netplay.inputsData[frame]) {
+                            this.play(true);
+                        }
+                        if (frame + 10 <= inFrame && inFrame > this.netplay.init_frame + 100) {
+                            this.netplay.sendMessage({shortPause:this.netplay.playerID});
+                        }
+                    }
+                });
             }
             if (data.restart) {
                 this.gameManager.restart();
-                this.netplay.current_frame = 0;
-                this.netplay.inputs = {};
+                this.netplay.reset();
                 this.play(true);
             }
         }
         this.netplay.simulateInput = (player, index, value, resp) => {
             if (!this.isNetplay) return;
             if (player !== 0 && !resp) return;
+            player = this.netplay.getUserIndex(this.netplay.playerID);
+            let frame = this.netplay.currentFrame;
             if (this.netplay.owner) {
-                const frame = this.netplay.current_frame;
-                this.gameManager.functions.simulateInput(player, index, value);
-                this.netplay.sendMessage({
+                if (!this.netplay.inputsData[frame]) {
+                    this.netplay.inputsData[frame] = [];
+                }
+                this.netplay.inputsData[frame].push({
                     frame: frame,
                     connected_input: [player, index, value]
-                });
+                })
+                this.gameManager.functions.simulateInput(player, index, value);
             } else {
                 this.netplay.sendMessage({
-                    user: this.netplay.playerID,
-                    input: [index, value]
-                });
+                    "sync-control": [{
+                        frame: frame+10,
+                        connected_input: [player, index, value]
+                    }]
+                })
             }
         }
         this.netplay.sendMessage = (data) => {
             this.netplay.socket.emit("data-message", data);
         }
+        this.netplay.reset = () => {
+            this.netplay.init_frame = this.netplay.currentFrame;
+            this.netplay.inputsData = {};
+        }
         //let fps;
         //let lastTime;
+        this.netplay.init_frame = 0;
+        this.netplay.currentFrame = 0;
+        this.netplay.inputsData = {};
         this.Module.postMainLoop = () => {
             //const newTime = window.performance.now();
             //fps = 1000 / (newTime - lastTime);
             //console.log(fps);
             //lastTime = newTime;
-            if (!this.isNetplay || this.paused) return;
-            this.netplay.current_frame++;
+            
+            //frame syncing - working
+            //control syncing - broken
+            this.netplay.currentFrame = parseInt(this.gameManager.getFrameNum()) - this.netplay.init_frame;
+            if (!this.isNetplay) return;
             if (this.netplay.owner) {
-                for (const k in this.netplay.users) {
-                    if (this.netplay.getUserIndex(k) === -1) {
-                        delete this.netplay.users[k];
-                        continue;
-                    }
-                    const diff = this.netplay.current_frame - this.netplay.users[k];
-                    //console.log(diff);
-                    if (Math.abs(diff) > 75) {
-                        this.netplay.sync();
-                        return;
-                    }
-                    //this'll be adjusted if needed
-                    if (diff < 0) {
-                        this.netplay.sendMessage({
-                            lessShortPause: k
-                        })
-                    }
-                    if (diff < 5) {
-                        this.netplay.sendMessage({
-                            shortPause: k
-                        })
-                    } else if (diff > 30) {
-                        this.pause(true);
-                        setTimeout(() => this.play(true), 10);
-                    } else if (diff > 10) {
-                        this.pause(true);
-                        setTimeout(() => this.play(true), 5);
-                    }
-                }
+                let to_send = [];
+                let i = this.netplay.currentFrame-1;
+                this.netplay.inputsData[i] ? this.netplay.inputsData[i].forEach((value) => {
+                    value.frame+=10;
+                    to_send.push(value);
+                }) : to_send.push({frame: i+10});
+                this.netplay.sendMessage({"sync-control": to_send});
             } else {
-                this.netplay.sendMessage({
-                    user_frame: {
-                        user: this.netplay.playerID,
-                        frame: this.netplay.current_frame
-                    }
-                });
-                for (const k in this.netplay.inputs) {
-                    if (k <= this.netplay.current_frame) {
-                        this.netplay.inputs[k].forEach(data => {
-                            this.gameManager.functions.simulateInput(data[0], data[1], data[2]);
-                        })
-                        delete this.netplay.inputs[k];
-                    }
+                if (this.netplay.currentFrame <= 0 || this.netplay.inputsData[this.netplay.currentFrame]) {
+                    this.netplay.wait = false;
+                    this.play();
+                    this.netplay.inputsData[this.netplay.currentFrame].forEach((value) => {
+                        if (!value.connected_input) return;
+                        console.log(value.connected_input);
+                        this.gameManager.functions.simulateInput(value.connected_input[0], value.connected_input[1], value.connected_input[2]);
+                    })
+                } else if (!this.netplay.syncing) {
+                    console.log("sync");
+                    this.pause(true);
+                    this.netplay.sendMessage({sync:true});
+                    this.netplay.syncing = true;
                 }
             }
+            if (this.netplay.currentFrame % 100 === 0) {
+                Object.keys(this.netplay.inputsData).forEach(value => {
+                    if (value < this.netplay.currentFrame - 50) {
+                        this.netplay.inputsData[value] = null;
+                        delete this.netplay.inputsData[value];
+                    }
+                })
+            }
+            
+            
         }
         
         this.netplay.updateList = {
