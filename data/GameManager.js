@@ -12,7 +12,7 @@ class EJS_GameManager {
             simulateInput: this.Module.cwrap('simulate_input', 'null', ['number', 'number', 'number']),
             toggleMainLoop: this.Module.cwrap('toggleMainLoop', 'null', ['number']),
             getCoreOptions: this.Module.cwrap('get_core_options', 'string', []),
-            setVariable: this.Module.cwrap('set_variable', 'null', ['string', 'string']),
+            setVariable: this.Module.cwrap('ejs_set_variable', 'null', ['string', 'string']),
             setCheat: this.Module.cwrap('set_cheat', 'null', ['number', 'number', 'string']),
             resetCheat: this.Module.cwrap('reset_cheat', 'null', []),
             toggleShader: this.Module.cwrap('shader_enable', 'null', ['number']),
@@ -23,7 +23,6 @@ class EJS_GameManager {
             saveSaveFiles: this.Module.cwrap('cmd_savefiles', '', []),
             supportsStates: this.Module.cwrap('supports_states', 'number', []),
             loadSaveFiles: this.Module.cwrap('refresh_save_files', 'null', []),
-            setVolume: this.Module.cwrap('set_volume', 'null', ['number']),
             toggleFastForward: this.Module.cwrap('toggle_fastforward', 'null', ['number']),
             setFastForwardRatio: this.Module.cwrap('set_ff_ratio', 'null', ['number']),
             toggleRewind: this.Module.cwrap('toggle_rewind', 'null', ['number']),
@@ -82,7 +81,14 @@ class EJS_GameManager {
             this.FS.writeFile('/shader/'+shader, window.EJS_SHADERS[shader]);
         }
     }
+    clearEJSResetTimer() {
+        if (this.EJS.resetTimeout) {
+            clearTimeout(this.EJS.resetTimeout);
+            delete this.EJS.resetTimeout;
+        }
+    }
     restart() {
+        this.clearEJSResetTimer();
         this.functions.restart();
     }
     getState() {
@@ -116,6 +122,7 @@ class EJS_GameManager {
             this.FS.unlink('game.state');
         } catch(e){}
         this.FS.writeFile('/game.state', state);
+        this.clearEJSResetTimer();
         this.functions.loadState("game.state", 0);
         setTimeout(() => {
             try {
@@ -142,6 +149,7 @@ class EJS_GameManager {
         if (!slot) slot = 1;
         (async () => {
             let name = slot + '-quick.state';
+            this.clearEJSResetTimer();
             this.functions.loadState(name, 0);
         })();
     }
@@ -311,6 +319,7 @@ class EJS_GameManager {
         return (exists ? FS.readFile(this.getSaveFilePath()) : null);
     }
     loadSaveFiles() {
+        this.clearEJSResetTimer();
         this.functions.loadSaveFiles();
     }
     setFastForwardRatio(ratio) {

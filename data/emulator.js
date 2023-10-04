@@ -1,5 +1,5 @@
 class EmulatorJS {
-    version = 10; //Increase by 1 when cores are updated
+    version = 11; //Increase by 1 when cores are updated
     getCore(generic) {
         const core = this.config.system;
         /*todo:
@@ -46,7 +46,9 @@ class EmulatorJS {
                 'snes9x': 'snes',
                 'stella2014': 'atari2600',
                 'virtualjaguar': 'jaguar',
-                'yabause': 'segaSaturn'
+                'yabause': 'segaSaturn',
+                'puae': 'amiga',
+                'vice_x64': 'c64'
             }
             return options[core] || core;
         }
@@ -79,6 +81,8 @@ class EmulatorJS {
             'ngp': 'mednafen_ngp',
             'ws': 'mednafen_wswan',
             'coleco': 'gearcoleco',
+            'amiga': 'puae',
+            'c64': 'vice_x64'
         }
         if (this.isSafari && this.isMobile && this.getCore(true) === "n64") {
             return "parallel_n64";
@@ -87,6 +91,7 @@ class EmulatorJS {
     }
     extensions = {
         'a5200': ['a52', 'bin'],
+        'amiga': ['adf', 'adz', 'dms', 'fdi', 'ipf', 'raw', 'hdf', 'hdz', 'lha', 'slave', 'info', 'cue', 'ccd', 'chd', 'nrg', 'mds', 'iso', 'uae', 'm3u', 'zip', '7z'],
         'desmume': ['nds', 'bin'],
         'desmume2015': ['nds', 'bin'],
         'fbalpha2012_cps1': ['zip'],
@@ -98,6 +103,7 @@ class EmulatorJS {
         'genesis_plus_gx': ['m3u', 'mdx', 'md', 'smd', 'gen', 'bin', 'cue', 'iso', 'chd', 'bms', 'sms', 'gg', 'sg', '68k', 'sgd'],
         'handy': ['lnx'],
         'mame2003': ['zip'],
+        'mame2003_plus': ['zip'],
         'mednafen_ngp': ['ngp', 'ngc'],
         'mednafen_pce': ['pce', 'cue', 'ccd', 'iso', 'img', 'bin', 'chd'],
         'mednafen_pcfx': ['cue', 'ccd', 'toc', 'chd'],
@@ -117,6 +123,7 @@ class EmulatorJS {
         'prosystem': ['a78', 'bin'],
         'snes9x': ['smc', 'sfc', 'swc', 'fig', 'bs', 'st'],
         'stella2014': ['a26', 'bin', 'zip'],
+        'vice_x64': ['d64', 'd6z', 'd71', 'd7z', 'd80', 'd81', 'd82', 'd8z', 'g64', 'g6z', 'g41', 'g4z', 'x64', 'x6z', 'nib', 'nbz', 'd2m', 'd4m', 't64', 'tap', 'tcrt', 'prg', 'p00', 'crt', 'bin', 'cmd', 'm3u', 'vfl', 'vsf', 'zip', '7z', 'gz', '20', '40', '60', 'a0', 'b0', 'rom'],
         'virtualjaguar': ['j64', 'jag', 'rom', 'abs', 'cof', 'bin', 'prg'],
         'yabause': ['cue', 'iso', 'ccd', 'mds', 'chd', 'zip', 'm3u']
     }
@@ -244,8 +251,8 @@ class EmulatorJS {
         })
     }
     constructor(element, config) {
-        this.ejs_version = "4.0.7";
-        this.ejs_num_version = 40.7;
+        this.ejs_version = "4.0.8";
+        this.ejs_num_version = 40.8;
         this.debug = (window.EJS_DEBUG_XX === true);
         if (this.debug || (window.location && ['localhost', '127.0.0.1'].includes(location.hostname))) this.checkForUpdates();
         this.netplayEnabled = (window.EJS_DEBUG_XX === true) && (window.EJS_EXPERIMENTAL_NETPLAY === true);
@@ -299,7 +306,7 @@ class EmulatorJS {
                 this.game.classList.remove("ejs_game_background");
                 if (this.config.backgroundBlur) this.game.classList.remove("ejs_game_background_blur");
             })
-        }else{
+        } else {
             this.game.setAttribute("style", "--ejs-background-color: "+this.config.backgroundColor+";");
         }
         
@@ -310,7 +317,8 @@ class EmulatorJS {
                     this.cheats.push({
                         desc: cheat[0],
                         checked: false,
-                        code: cheat[1]
+                        code: cheat[1],
+                        is_permanent: true
                     })
                 }
             }
@@ -389,9 +397,12 @@ class EmulatorJS {
     adBlocked(url, del){
         if (del){
             document.querySelector('div[class="ejs_ad_iframe"]').remove();
-        }else{
-            document.querySelector('iframe[src="'+this.config.adUrl+'"]').src = url;
+        } else {
+            try {
+                document.querySelector('div[class="ejs_ad_iframe"]').remove();
+            } catch(e) {}
             this.config.adUrl = url;
+            this.setupAds(this.config.adUrl, this.config.adSize[0], this.config.adSize[1]);
         }
     }
     functions = {};
@@ -427,7 +438,7 @@ class EmulatorJS {
             button.classList.add("ejs_start_button_border");
             border = 1;
         }
-        button.innerText = this.localization("Start Game");
+        button.innerText = (typeof this.config.startBtnName === 'string') ? this.config.startBtnName : this.localization("Start Game");
         if (this.config.alignStartButton == "top"){
             button.style.bottom = "calc(100% - 20px)";
         }else if (this.config.alignStartButton == "center"){
@@ -887,7 +898,7 @@ class EmulatorJS {
                 const altName = this.config.gameUrl.startsWith("blob:") ? (this.config.gameName || "game") : extractFileNameFromUrl(this.config.gameUrl);
 
                 let disableCue = false;
-                if (['pcsx_rearmed', 'genesis_plus_gx', 'picodrive', 'mednafen_pce'].includes(this.getCore()) && this.config.disableCue === undefined) {
+                if (['pcsx_rearmed', 'genesis_plus_gx', 'picodrive', 'mednafen_pce', 'vice_x64'].includes(this.getCore()) && this.config.disableCue === undefined) {
                     disableCue = true;
                 } else {
                     disableCue = this.config.disableCue;
@@ -1056,6 +1067,11 @@ class EmulatorJS {
             args.push('/'+this.fileName);
             if (this.debug) console.log(args);
             this.Module.callMain(args);
+            if (typeof this.config.softLoad === "number" && this.config.softLoad > 0) {
+                this.resetTimeout = setTimeout(() => {
+                    this.gameManager.restart();
+                }, this.config.softLoad * 1000);
+            }
             this.Module.resumeMainLoop();
             this.checkSupportedOpts();
             this.setupSettingsMenu();
@@ -1082,6 +1098,10 @@ class EmulatorJS {
                     if (this.debug) console.warn("Could not fullscreen on load");
                 }
             }
+            if (this.isSafari && this.isMobile) {
+                //Safari is --- funny
+                this.checkStarted();
+            }
         } catch(e) {
             console.warn("failed to start game", e);
             this.textElem.innerText = this.localization("Failed to start game");
@@ -1089,6 +1109,33 @@ class EmulatorJS {
             return;
         }
         this.callEvent("start");
+    }
+    checkStarted() {
+        (async() => {
+            let sleep = (ms) => new Promise(r => setTimeout(r, ms));
+            let state = "suspended";
+            let popup;
+            while (state === "suspended") {
+                if (!window.AL) return;
+                window.AL.currentCtx.sources.forEach(ctx => {
+                    state = ctx.gain.context.state;
+                });
+                if (state !== "suspended") break;
+                if (!popup) {
+                    popup = this.createPopup("", {});
+                    const button = this.createElement("button");
+                    button.innerText = "Click to resume Emulator";
+                    button.classList.add("ejs_menu_button");
+                    button.style.width = "25%";
+                    button.style.height = "25%";
+                    popup.appendChild(button);
+                    popup.style["text-align"] = "center";
+                    popup.style["font-size"] = "28px";
+                }
+                await sleep(10);
+            }
+            if (popup) this.closePopup();
+        })();
     }
     bindListeners() {
         this.createContextMenu();
@@ -1103,6 +1150,54 @@ class EmulatorJS {
         })
         this.addEventListener(window, "resize", this.handleResize.bind(this));
         //this.addEventListener(window, "blur", e => console.log(e), true); //TODO - add "click to make keyboard keys work" message?
+        
+        let counter = 0;
+        this.elements.statePopupPanel = this.createPopup("", {}, true);
+        this.elements.statePopupPanel.innerText = "Drop save state here to load";
+        this.elements.statePopupPanel.style["text-align"] = "center";
+        this.elements.statePopupPanel.style["font-size"] = "28px";
+        this.addEventListener(this.elements.parent, "dragenter", (e) => {
+            e.preventDefault();
+            if (!this.started) return;
+            counter++;
+            this.elements.statePopupPanel.parentElement.style.display = "block";
+        });
+        this.addEventListener(this.elements.parent, "dragover", (e) => {
+            e.preventDefault();
+        });
+        this.addEventListener(this.elements.parent, "dragleave", (e) => {
+            e.preventDefault();
+            if (!this.started) return;
+            counter--;
+            if (counter === 0) {
+                this.elements.statePopupPanel.parentElement.style.display = "none";
+            }
+        });
+        this.addEventListener(this.elements.parent, "dragend", (e) => {
+            e.preventDefault();
+            if (!this.started) return;
+            counter = 0;
+            this.elements.statePopupPanel.parentElement.style.display = "none";
+        });
+        this.addEventListener(this.elements.parent, "drop", (e) => {
+            e.preventDefault();
+            if (!this.started) return;
+            this.elements.statePopupPanel.parentElement.style.display = "none";
+            counter = 0;
+            const items = e.dataTransfer.items;
+            let file;
+            for (let i=0; i<items.length; i++) {
+                if (items[i].kind !== 'file') continue;
+                file = items[i];
+                break;
+            }
+            if (!file) return;
+            const fileHandle = file.getAsFile();
+            fileHandle.arrayBuffer().then(data => {
+                this.gameManager.loadState(new Uint8Array(data));
+            })
+        });
+        
         this.gamepad = new GamepadHandler(); //https://github.com/ethanaobrien/Gamepad
         this.gamepad.on('connected', (e) => {
             if (!this.gamepadLabels) return;
@@ -1887,6 +1982,7 @@ class EmulatorJS {
             },
             "Clear": () => {
                 this.controls = {0:{},1:{},2:{},3:{}};
+                this.setupKeys();
                 this.checkGamepadInputs();
                 this.saveSettings();
             },
@@ -2371,8 +2467,7 @@ class EmulatorJS {
                     textBox2.value = "";
                     textBox1.value = "";
                     if (this.controls[i][k] && this.controls[i][k].value !== undefined) {
-                        let value = this.controls[i][k].value.toString();
-                        if (value === " ") value = "space";
+                        let value = this.keyMap[this.controls[i][k].value];
                         value = this.localization(value);
                         textBox2.value = value;
                     }
@@ -2391,8 +2486,7 @@ class EmulatorJS {
                 })
                 
                 if (this.controls[i][k] && this.controls[i][k].value) {
-                    let value = this.controls[i][k].value.toString();
-                    if (value === " ") value = "space";
+                    let value = this.keyMap[this.controls[i][k].value];
                     value = this.localization(value);
                     textBox2.value = value;
                 }
@@ -2469,7 +2563,7 @@ class EmulatorJS {
             if (!this.controls[player][num]) {
                 this.controls[player][num] = {};
             }
-            this.controls[player][num].value = "";
+            this.controls[player][num].value = 0;
             this.controls[player][num].value2 = "";
             this.controlPopup.parentElement.parentElement.setAttribute("hidden", "");
             this.checkGamepadInputs();
@@ -2491,123 +2585,109 @@ class EmulatorJS {
         0: {
             0: {
                 'value': 'x',
-                'value2': 'BUTTON_2',
-                'keycode': 88
+                'value2': 'BUTTON_2'
             },
             1: {
                 'value': 's',
-                'value2': 'BUTTON_4',
-                'keycode': 83
+                'value2': 'BUTTON_4'
             },
             2: {
                 'value': 'v',
-                'value2': 'SELECT',
-                'keycode': 86
+                'value2': 'SELECT'
             },
             3: {
                 'value': 'enter',
-                'value2': 'START',
-                'keycode': 13
+                'value2': 'START'
             },
             4: {
                 'value': 'up arrow',
-                'value2': 'DPAD_UP',
-                'keycode': 38
+                'value2': 'DPAD_UP'
             },
             5: {
-                'value': 'arrowdown',
-                'value2': 'DPAD_DOWN',
-                'keycode': 40
+                'value': 'down arrow',
+                'value2': 'DPAD_DOWN'
             },
             6: {
-                'value': 'arrowleft',
-                'value2': 'DPAD_LEFT',
-                'keycode': 37
+                'value': 'left arrow',
+                'value2': 'DPAD_LEFT'
             },
             7: {
-                'value': 'arrowright',
-                'value2': 'DPAD_RIGHT',
-                'keycode': 39
+                'value': 'right arrow',
+                'value2': 'DPAD_RIGHT'
             },
             8: {
                 'value': 'z',
-                'value2': 'BUTTON_1',
-                'keycode': 90
+                'value2': 'BUTTON_1'
             },
             9: {
                 'value': 'a',
-                'value2': 'BUTTON_3',
-                'keycode': 65
+                'value2': 'BUTTON_3'
             },
             10: {
                 'value': 'q',
-                'value2': 'LEFT_TOP_SHOULDER',
-                'keycode': 81
+                'value2': 'LEFT_TOP_SHOULDER'
             },
             11: {
                 'value': 'e',
-                'value2': 'RIGHT_TOP_SHOULDER',
-                'keycode': 69
+                'value2': 'RIGHT_TOP_SHOULDER'
             },
             12: {
-                'value': 'e',
-                'value2': 'LEFT_BOTTOM_SHOULDER',
-                'keycode': 69
+                'value': 'tab',
+                'value2': 'LEFT_BOTTOM_SHOULDER'
             },
             13: {
-                'value': 'w',
-                'value2': 'RIGHT_BOTTOM_SHOULDER',
-                'keycode': 87
+                'value': 'r',
+                'value2': 'RIGHT_BOTTOM_SHOULDER'
             },
             14: {
+                'value': '',
                 'value2': 'LEFT_STICK',
             },
             15: {
+                'value': '',
                 'value2': 'RIGHT_STICK',
             },
             16: {
                 'value': 'h',
-                'value2': 'LEFT_STICK_X:+1',
-                'keycode': 72
+                'value2': 'LEFT_STICK_X:+1'
             },
             17: {
                 'value': 'f',
-                'value2': 'LEFT_STICK_X:-1',
-                'keycode': 70
+                'value2': 'LEFT_STICK_X:-1'
             },
             18: {
                 'value': 'g',
-                'value2': 'LEFT_STICK_Y:+1',
-                'keycode': 71
+                'value2': 'LEFT_STICK_Y:+1'
             },
             19: {
                 'value': 't',
-                'value2': 'LEFT_STICK_Y:-1',
-                'keycode': 84
+                'value2': 'LEFT_STICK_Y:-1'
             },
             20: {
                 'value': 'l',
-                'value2': 'RIGHT_STICK_X:+1',
-                'keycode': 76
+                'value2': 'RIGHT_STICK_X:+1'
             },
             21: {
                 'value': 'j',
-                'value2': 'RIGHT_STICK_X:-1',
-                'keycode': '74'
+                'value2': 'RIGHT_STICK_X:-1'
             },
             22: {
                 'value': 'k',
-                'value2': 'RIGHT_STICK_Y:+1',
-                'keycode': '75'
+                'value2': 'RIGHT_STICK_Y:+1'
             },
             23: {
                 'value': 'i',
-                'value2': 'RIGHT_STICK_Y:-1',
-                'keycode': '73'
+                'value2': 'RIGHT_STICK_Y:-1'
             },
-            24: {},
-            25: {},
-            26: {},
+            24: {
+                'value': '1'
+            },
+            25: {
+                'value': '2'
+            },
+            26: {
+                'value': '3'
+            },
             27: {},
             28: {},
             29: {},
@@ -2617,6 +2697,7 @@ class EmulatorJS {
         3: {}
     }
     keyMap = {
+        0: '',
         8: 'backspace',
         9: 'tab',
         13: 'enter',
@@ -2721,21 +2802,24 @@ class EmulatorJS {
     setupKeys(){
         for (let i=0; i<4; i++) {
             for (let j=0; j<30; j++) {
-                if (this.controls[i][j] && this.controls[i][j].value === this.keyMap[this.keyLookup(this.controls[i][j])]) {
-                    this.controls[i][j].keycode = Number(this.keyLookup(this.controls[i][j]));
+                if (this.controls[i][j] && this.keyMap) {
+                    this.controls[i][j].value = Number(this.keyLookup(this.controls[i][j]));
+                    if(this.controls[i][j].value === -1){
+                        console.warn("Invalid key for control "+j+" player "+i+" with value "+this.keyMap[this.keyLookup(this.defaultControllers[i][j])]);
+                    }
                 }
             }
         }
     }
     keyLookup(controllerkey){
         for (var key in this.keyMap) {
-            if (this.keyMap[key] === controllerkey.value) {
+            if (this.keyMap[key] === controllerkey.value || key === controllerkey.value) {
                 return key;
-            }else if (controllerkey.keycode !== undefined) {
-                return controllerkey.keycode;
+            } else if (controllerkey.value === undefined) {
+                return 0;
             }
         }
-        return 0;
+        return -1;
     }
     keyChange(e) {
         if (e.repeat) return;
@@ -2746,8 +2830,7 @@ class EmulatorJS {
             if (!this.controls[player][num]) {
                 this.controls[player][num] = {};
             }
-            this.controls[player][num].value = e.key.toLowerCase();
-            this.controls[player][num].keycode = e.keyCode;
+            this.controls[player][num].value = e.keyCode;
             this.controlPopup.parentElement.parentElement.setAttribute("hidden", "");
             this.checkGamepadInputs();
             this.saveSettings();
@@ -2758,7 +2841,7 @@ class EmulatorJS {
         const special = [16, 17, 18, 19, 20, 21, 22, 23];
         for (let i=0; i<4; i++) {
             for (let j=0; j<30; j++) {
-                if (this.controls[i][j] && this.controls[i][j].keycode === e.keyCode) {
+                if (this.controls[i][j] && this.controls[i][j].value === e.keyCode) {
                     this.gameManager.simulateInput(i, j, (e.type === 'keyup' ? 0 : (special.includes(j) ? 0x7fff : 1)));
                 }
             }
@@ -4647,6 +4730,12 @@ class EmulatorJS {
             }
         }, true);
         this.cheatMenu = body.parentElement;
+        this.cheatMenu.getElementsByTagName("h4")[0].style["padding-bottom"] = "0px";
+        const msg = this.createElement("div");
+        msg.style["padding-top"] = "0px";
+        msg.style["padding-bottom"] = "15px";
+        msg.innerText = "Note that some cheats require a restart to disable.";
+        body.appendChild(msg);
         const rows = this.createElement("div");
         body.appendChild(rows);
         rows.classList.add("ejs_cheat_rows");
@@ -4654,13 +4743,8 @@ class EmulatorJS {
     }
     updateCheatUI() {
         this.elements.cheatRows.innerHTML = "";
-        const getIndex = (desc, code) => {
-            for (let i=0; i<this.cheats.length; i++) {
-                if (this.cheats[i].desc === desc && this.cheats[i].code === code) return i;
-            }
-        }
         
-        const addToMenu = (desc, checked, code, i) => {
+        const addToMenu = (desc, checked, code, is_permanent, i) => {
             const row = this.createElement("div");
             row.classList.add("ejs_cheat_row");
             const input = this.createElement("input");
@@ -4675,28 +4759,28 @@ class EmulatorJS {
             row.appendChild(label);
             label.addEventListener("click", (e) => {
                 input.checked = !input.checked;
-                this.cheats[getIndex(desc, code)].checked = input.checked;
-                this.cheatChanged(input.checked, code, getIndex(desc, code));
+                this.cheats[i].checked = input.checked;
+                this.cheatChanged(input.checked, code, i);
                 this.saveSettings();
             })
-            const close = this.createElement("a");
-            close.classList.add("ejs_cheat_row_button");
-            close.innerText = "×";
-            row.appendChild(close);
-            close.addEventListener("click", (e) => {
-                this.cheatChanged(false, code, getIndex(desc, code));
-                this.cheats.splice(getIndex(desc, code), 1);
-                row.remove();
-                this.saveSettings();
-            })
-            
+            if (!is_permanent) {
+                const close = this.createElement("a");
+                close.classList.add("ejs_cheat_row_button");
+                close.innerText = "×";
+                row.appendChild(close);
+                close.addEventListener("click", (e) => {
+                    this.cheatChanged(false, code, i);
+                    this.cheats.splice(i, 1);
+                    this.updateCheatUI();
+                    this.saveSettings();
+                })
+            }
             this.elements.cheatRows.appendChild(row);
             this.cheatChanged(checked, code, i);
-            
         }
         this.gameManager.resetCheat();
         for (let i=0; i<this.cheats.length; i++) {
-            addToMenu(this.cheats[i].desc, this.cheats[i].checked, this.cheats[i].code, i);
+            addToMenu(this.cheats[i].desc, this.cheats[i].checked, this.cheats[i].code, this.cheats[i].is_permanent, i);
         }
     }
     cheatChanged(checked, code, index) {
